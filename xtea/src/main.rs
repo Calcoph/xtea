@@ -158,7 +158,6 @@ impl Plugins {
 }
 
 fn init_plugin(plugin: &Plugin) {
-    trace!("initialized {}", plugin.get_name());
     let ctx = unsafe {imgui::sys::igGetCurrentContext()};
     let malloc = &mut None;
     let free = &mut None;

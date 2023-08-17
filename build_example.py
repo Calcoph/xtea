@@ -30,5 +30,6 @@ if example not in available_examples:
     print_examples()
 
 pwsh(f"cargo build --package {example}-example")
+pwsh("New-Item -ItemType Directory plugins")
 pwsh(f"rm plugins/{example}_example.dll")
 pwsh(f"Move-Item -Path target-win/debug/{example}_example.dll -Destination plugins/{example}_example.dll")
