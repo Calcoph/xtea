@@ -1,9 +1,13 @@
 use std::{collections::HashMap, path::{Path, PathBuf}};
 
-use imgui::Ui;
+use imgui::{Ui, StyleColor, StyleVar};
 use log::error;
 
 use crate::{IMGUI_LOGGER, Plugins};
+
+use self::style_editor::style_editor_window;
+
+mod style_editor;
 
 pub struct UiState {
     logs: HashMap<String, Vec<String>>,
@@ -43,7 +47,9 @@ pub(crate) fn create_ui(ui: &Ui, state: &mut UiState, plugins: &mut Plugins) {
 }
 
 fn style_editor(ui: &Ui, state: &mut UiState) {
-    ui.show_default_style_editor()
+    ui.window("Style").focus_on_appearing(false).build(|| {
+        style_editor_window(ui)
+    });
 }
 
 fn plugin_manager(ui: &Ui, state: &mut UiState, plugins: &mut Plugins) {
@@ -79,6 +85,8 @@ fn create_menu(ui: &Ui, state: &mut UiState, plugins: &Plugins) {
             ui.checkbox("Logs", &mut state.view_logs);
             ui.checkbox("Style Editor", &mut state.view_style_editor);
             ui.checkbox("Plugin Manager", &mut state.view_plugin_manager);
+            ui.text("Plugins");
+            ui.separator();
             for plugin in plugins.view_submenu_iter() {
                 plugin.view_submenu(ui)
             }
