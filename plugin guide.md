@@ -17,7 +17,6 @@ A plugin **must** contain all of these public functions
 pub fn init_logger(logger: &'static ImguiLogger) {
     logger.init().unwrap()
 }
-
 ```
 
 ## init
@@ -85,6 +84,6 @@ pub fn get_name() -> String {
 
 #[no_mangle]
 pub fn view_submenu(ui: &Ui) {
-    
+
 }
 ```
