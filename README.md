@@ -2,6 +2,9 @@ xtea is an empty application with little features.
 
 It is meant as a container of plugins. Without plugins, it's just an empty ImGui window.
 
+xtea with all the example plugins:
+![xtea window](resources/image.png)
+
 # Installing
 
 To complile, you have to have rust. Install rust at [](https://www.rust-lang.org/tools/install).
