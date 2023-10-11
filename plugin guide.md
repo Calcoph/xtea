@@ -5,7 +5,8 @@ When creating windows:
 # Mandatory functions
 
 A plugin **must** contain all of these public functions
-* [init](#init)
+* [init_imgui](#init_imgui)
+* [init_plugin](#init_plugin)
 * [build_ui](#build_ui)
 * [get_name](#get_name)
 * [init_logger](#init_logger)
@@ -19,12 +20,19 @@ pub fn init_logger(logger: &'static ImguiLogger) {
 }
 ```
 
-## init
+## init_imgui
 ```rust
 #[no_mangle]
 pub fn init(ctx: *mut imgui::sys::ImGuiContext, malloc: ImGuiMemAllocFunc, free: ImGuiMemFreeFunc) {
     unsafe {imgui::sys::igSetCurrentContext(ctx)}
     unsafe {imgui::sys::igSetAllocatorFunctions(malloc, free, ptr::null_mut())}
+}
+```
+
+## init_plugin
+```rust
+#[no_mangle]
+pub fn init_plugin() {
     // your code here
 }
 ```
@@ -67,9 +75,14 @@ pub fn init_logger(logger: &'static ImguiLogger) {
 }
 
 #[no_mangle]
-pub fn init(ctx: *mut imgui::sys::ImGuiContext, malloc: ImGuiMemAllocFunc, free: ImGuiMemFreeFunc) {
+pub fn init_imgui(ctx: *mut imgui::sys::ImGuiContext, malloc: ImGuiMemAllocFunc, free: ImGuiMemFreeFunc) {
     unsafe {imgui::sys::igSetCurrentContext(ctx)}
     unsafe {imgui::sys::igSetAllocatorFunctions(malloc, free, ptr::null_mut())}
+}
+
+#[no_mangle]
+pub fn init_plugin() {
+
 }
 
 #[no_mangle]

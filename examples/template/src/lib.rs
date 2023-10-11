@@ -9,9 +9,14 @@ pub fn init_logger(logger: &'static ImguiLogger) {
 }
 
 #[no_mangle]
-pub fn init(ctx: *mut imgui::sys::ImGuiContext, malloc: ImGuiMemAllocFunc, free: ImGuiMemFreeFunc) {
+pub fn init_imgui(ctx: *mut imgui::sys::ImGuiContext, malloc: ImGuiMemAllocFunc, free: ImGuiMemFreeFunc) {
     unsafe {imgui::sys::igSetCurrentContext(ctx)}
     unsafe {imgui::sys::igSetAllocatorFunctions(malloc, free, ptr::null_mut())}
+}
+
+#[no_mangle]
+pub fn init_plugin() {
+
 }
 
 #[no_mangle]
@@ -26,5 +31,5 @@ pub fn get_name() -> String {
 
 #[no_mangle]
 pub fn view_submenu(ui: &Ui) {
-    
+
 }

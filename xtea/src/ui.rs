@@ -58,20 +58,25 @@ fn plugin_manager(ui: &Ui, state: &mut UiState, plugins: &mut Plugins) {
             plugins.reload_all_plugins();
         }
 
-        // to avoid borrowing plugins
+        // to avoid borrowing `plugins`
         let mut tmp_vec = vec![];
         std::mem::swap(&mut plugins.all_plugins, &mut tmp_vec);
 
+        let mut activating_plugins = Vec::new();
         for (plugin_name, dll_path) in tmp_vec.iter() {
             let active = plugins.loaded_plugins.get(plugin_name).is_some();
             if ui.checkbox(plugin_name, &mut (active.clone())) {
                 if active {
                     plugins.unload(plugin_name)
                 } else {
-                    plugins.activate(dll_path)
+                    if let Some(plugin_thread) = plugins.activate(dll_path) {
+                        activating_plugins.push(plugin_thread)
+                    }
                 }
             }
         }
+
+        plugins.wait_init_plugins(activating_plugins);
         std::mem::swap(&mut plugins.all_plugins, &mut tmp_vec);
     });
 }
@@ -113,7 +118,7 @@ fn logger_windw(ui: &Ui, state: &mut UiState) {
                         if !log_path.parent().unwrap().exists() {
                             // logs folder doesn't exist
                             if let Err(e) = std::fs::create_dir("logs") {
-                                error!("Could not create logs directory\n\t{e}")    
+                                error!("Could not create logs directory\n\t{e}")
                             }
                         }
                         if let Err(e) = std::fs::write(log_path, content) {

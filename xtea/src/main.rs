@@ -1,4 +1,4 @@
-use std::{time::Instant, collections::HashMap, ffi::OsString, path::{Path, PathBuf}};
+use std::{time::Instant, collections::HashMap, ffi::OsString, path::{Path, PathBuf}, thread::{Thread, JoinHandle}};
 
 use log::{error, trace};
 use xtealib::ImguiLogger;
@@ -25,7 +25,8 @@ static IMGUI_LOGGER: ImguiLogger = ImguiLogger::new();
 #[derive(WrapperApi)]
 struct PluginApi {
     init_logger: extern fn(logger: &'static ImguiLogger),
-    init: extern fn(ctx: *mut imgui::sys::ImGuiContext, malloc: ImGuiMemAllocFunc, free: ImGuiMemFreeFunc),
+    init_imgui: extern fn(ctx: *mut imgui::sys::ImGuiContext, malloc: ImGuiMemAllocFunc, free: ImGuiMemFreeFunc),
+    init_plugin: extern fn(),
     build_ui: extern fn(ui: &Ui),
     view_submenu: extern fn(ui: &Ui),
     get_name: extern fn() -> String
@@ -36,7 +37,6 @@ type Plugin = Container<PluginApi>;
 struct Plugins {
     all_plugins: Vec<(String, PathBuf)>,
     loaded_plugins: HashMap<String, Plugin>,
-    init_order: Vec<String>,
     ui_build_order: Vec<String>,
     view_submenu_order: Vec<String>
 }
@@ -46,7 +46,6 @@ impl Plugins {
         Plugins {
             all_plugins: Vec::new(),
             loaded_plugins: HashMap::new(),
-            init_order: Vec::new(),
             ui_build_order: Vec::new(),
             view_submenu_order: Vec::new()
         }
@@ -77,26 +76,27 @@ impl Plugins {
         };
 
 
-
+        let mut loading_plugins = Vec::new();
         for (plugin, file_name) in plugins_vec {
             // TODO: load the orders from a file
             let name = plugin.get_name();
             self.all_plugins.push((name.clone(), file_name));
-            self.loaded_plugins.insert(name.clone(), plugin);
-            self.init_order.push(name.clone());
-            self.ui_build_order.push(name.clone());
-            self.view_submenu_order.push(name);
+            loading_plugins.push((name, init_plugin(plugin)));
         };
 
-        for plugin in self.init_iter() {
-            init_plugin(plugin);
+        for (name, plugin_thread) in loading_plugins {
+            match plugin_thread.join() {
+                Ok(plugin) => {
+                    self.loaded_plugins.insert(name.clone(), plugin);
+                    self.ui_build_order.push(name.clone());
+                    self.view_submenu_order.push(name);
+                },
+                Err(e) => {
+                    error!("Unkown plugin crashed during initialization\n{e:?}")
+                }
+            }
         }
     }
-
-    fn init_iter(&self) -> impl Iterator<Item=&Plugin> {
-        self.init_order.iter().filter_map(|name| self.loaded_plugins.get(name))
-    }
-
     fn ui_build_iter(&self) -> impl Iterator<Item=&Plugin> {
         self.ui_build_order.iter().filter_map(|name| self.loaded_plugins.get(name))
     }
@@ -110,32 +110,40 @@ impl Plugins {
         let mut tmp_vec = vec![];
         std::mem::swap(&mut self.all_plugins, &mut tmp_vec);
 
+        let mut activating_plugins = Vec::new();
         for (plugin_name, dll) in tmp_vec.iter() {
-            self.reload_plugin_dll(plugin_name, dll);
+            if let Some(plugin_thread) = self.reload_plugin_dll(plugin_name, dll) {
+                activating_plugins.push(plugin_thread)
+            };
         }
+
+        self.wait_init_plugins(activating_plugins);
 
         std::mem::swap(&mut self.all_plugins, &mut tmp_vec);
     }
 
-    fn reload_plugin(&mut self, name: &str) {
+    fn reload_plugin(&mut self, name: &str) -> Option<JoinHandle<Plugin>> {
         let (name, dll_path) = self.all_plugins.iter().find(|(plugin_name, _)| name == plugin_name).unwrap().clone();
 
         self.reload_plugin_dll(&name, &dll_path)
     }
 
-    fn reload_plugin_dll(&mut self, name: &str, dll_path: &PathBuf) {
+    #[must_use]
+    fn reload_plugin_dll(&mut self, name: &str, dll_path: &PathBuf) -> Option<JoinHandle<Plugin>> {
         if let Some(plugin) = self.loaded_plugins.remove(name) {
             std::mem::drop(plugin);
             let plugin = unsafe{ Container::<PluginApi>::load(dll_path) };
             match plugin {
                 Ok(plugin) => {
-                    init_plugin(&plugin);
-                    self.loaded_plugins.insert(name.to_string(), plugin);
+                    Some(init_plugin(plugin))
                 },
                 Err(e) => {
                     error!("Failed to reload plugin {} ({})\n\t{}", dll_path.to_str().unwrap(), name, e);
+                    None
                 },
             }
+        } else {
+            None
         }
     }
 
@@ -143,28 +151,47 @@ impl Plugins {
         self.loaded_plugins.remove(plugin_name);
     }
 
-    fn activate(&mut self, dll_path: &PathBuf) {
+    #[must_use]
+    fn activate(&mut self, dll_path: &PathBuf) -> Option<JoinHandle<Plugin>> {
         let plugin = unsafe{ Container::<PluginApi>::load(dll_path) };
             match plugin {
                 Ok(plugin) => {
-                    init_plugin(&plugin);
-                    self.loaded_plugins.insert(plugin.get_name(), plugin);
+                    Some(init_plugin(plugin))
                 },
                 Err(e) => {
                     error!("Failed to load plugin {} \n\t{}", dll_path.to_str().unwrap(), e);
+                    None
                 },
             }
     }
+
+    fn wait_init_plugins(&mut self, activating_plugins: Vec<JoinHandle<Plugin>>) {
+        for plugin_thread in activating_plugins {
+            self.wait_init(plugin_thread)
+        }
+    }
+
+    fn wait_init(&mut self, activating_plugin: JoinHandle<Plugin>) {
+        match activating_plugin.join() {
+            Ok(plugin) => {
+                self.loaded_plugins.insert(plugin.get_name(), plugin);
+            },
+            Err(e) => {
+                error!("Unkown plugin crashed during initialization\n{e:?}")
+            },
+        }
+    }
 }
 
-fn init_plugin(plugin: &Plugin) {
+fn init_plugin(plugin: Plugin) -> JoinHandle<Plugin> {
     let ctx = unsafe {imgui::sys::igGetCurrentContext()};
     let malloc = &mut None;
     let free = &mut None;
     let user_data = &mut std::ptr::null_mut();
     unsafe {imgui::sys::igGetAllocatorFunctions(malloc, free, user_data)};
     plugin.init_logger(&IMGUI_LOGGER);
-    plugin.init(ctx, *malloc, *free);
+    plugin.init_imgui(ctx, *malloc, *free);
+    std::thread::spawn(|| {plugin.init_plugin(); plugin})
 }
 
 fn main() {
@@ -177,7 +204,7 @@ fn main() {
     let mut context = Context::create();
     let mut platform = imgui_winit_support::WinitPlatform::init(&mut context);
     platform.attach_window(context.io_mut(), &window, imgui_winit_support::HiDpiMode::Default);
-    
+
     let (device, queue, config, surface) = pollster::block_on(init_gpu(&window));
 
     let renderer_config = RendererConfig {
@@ -332,12 +359,12 @@ impl State {
                 let now = std::time::Instant::now();
                 //let dt = now - self.last_render_time;
                 self.last_render_time = now;
-    
+
                 //state.borrow_mut().update(dt, &gpu.borrow());
                 let output = self.surface.get_current_texture().unwrap();
                 let view = output.texture.create_view(&wgpu::TextureViewDescriptor::default());
                 //let mut encoders = te_renderer::state::TeState::prepare_render(&gpu.borrow());
-    
+
                 let imgui_encoder = self.render(&view);
                 self.queue.submit(vec![imgui_encoder.finish()]);
                 output.present();
@@ -352,9 +379,9 @@ impl State {
     ) -> CommandEncoder {
         self.platform.prepare_frame(self.context.io_mut(), &self.window).expect("Failed to prepare frame");
         let ui = self.context.frame();
-    
+
         ui::create_ui(&ui, &mut self.ui_state, &mut self.plugins);
-    
+
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor {
             label: Some("ImGui Render Encoder")
         });
